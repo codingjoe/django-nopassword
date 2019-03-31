@@ -1,7 +1,3 @@
-# -*- coding: utf8 -*-
-
-import django
-
 DEBUG = False
 
 DATABASES = {
@@ -13,23 +9,19 @@ DATABASES = {
 
 AUTH_USER_MODEL = 'tests.CustomUser'
 
-NOPASSWORD_LOGIN_CODE_TIMEOUT = 900
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
 
-    'rest_framework',
-    'rest_framework.authtoken',
-
     'nopassword',
+    'nopassword.contrib.admin',
+
     'tests',
 ]
 AUTHENTICATION_BACKENDS = (
-    'nopassword.backends.EmailBackend',
-    'django.contrib.auth.backends.ModelBackend'
+    'nopassword.backends.NoPasswordBackend',
 )
 
 TIME_ZONE = 'America/Chicago'
@@ -62,16 +54,8 @@ MIDDLEWARE = (
     'django.contrib.messages.middleware.MessageMiddleware',
 )
 
-if django.VERSION < (1, 10):
-    MIDDLEWARE_CLASSES = MIDDLEWARE
-
 ROOT_URLCONF = 'tests.urls'
 
 EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
-    ),
-}
+NOPASSWORD_LOGIN_CODE_TIMEOUT = 900

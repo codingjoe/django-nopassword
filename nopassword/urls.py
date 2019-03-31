@@ -1,10 +1,13 @@
-# -*- coding: utf8 -*-
-from django.conf.urls import url
+from django.contrib.auth.views import LogoutView
+from django.urls import path, re_path
 
 from nopassword import views
 
+app_name = 'nopassword'
+
 urlpatterns = [
-    url(r'^login/$', views.LoginView.as_view(), name='login'),
-    url(r'^login/code/$', views.LoginCodeView.as_view(), name='login_code'),
-    url(r'^logout/$', views.LogoutView.as_view(), name='logout'),
+    path('login/', views.LoginView.as_view(), name='login'),
+    path('login/success/', views.LoginRequestedView.as_view(), name='login-success'),
+    re_path('login/(?P<token>.*)/$', views.LoginTokenView.as_view(), name='login-token'),
+    path('logout/', LogoutView.as_view(), name='logout'),
 ]

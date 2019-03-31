@@ -1,26 +1,10 @@
+#!/usr/bin/env python
 import os
-import re
 import sys
 
 from setuptools import setup, find_packages
 
 os.environ['DJANGO_SETTINGS_MODULE'] = 'tests.settings'
-
-
-def _read_long_description():
-    try:
-        import pypandoc
-        return pypandoc.convert('README.md', 'rst')
-    except ImportError:
-        return None
-
-
-with open('nopassword/__init__.py', 'r') as fd:
-    version = re.search(
-        r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]',
-        fd.read(),
-        re.MULTILINE
-    ).group(1)
 
 try:
     from semantic_release import setup_hook
@@ -31,27 +15,22 @@ except ImportError:
 
 setup(
     name="django-nopassword",
-    version=version,
     url='http://github.com/relekang/django-nopassword',
     author='Rolf Erik Lekang',
     author_email='me@rolflekang.com',
     description='Authentication backend for django that uses a one time code instead of passwords',
-    long_description=_read_long_description(),
-    packages=find_packages(exclude=["*.tests", "*.tests.*", "tests.*", "tests"]),
+    packages=find_packages(exclude=['tests', 'docs']),
     install_requires=[
         'django>=1.11',
     ],
-    extras_require={
-        'rest': ['djangorestframework>=3.1.3'],
-    },
     tests_require=[
         'django>=1.11',
-        'twilio==4.4.0',
-        'mock>=1.0'
+    ],
+    setup_requires=[
+        'sphinx<2.0',
     ],
     license='MIT',
     test_suite='runtests.runtests',
-    include_package_data=True,
     classifiers=[
         "Programming Language :: Python",
         'Programming Language :: Python :: 2.7',

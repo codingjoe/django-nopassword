@@ -1,139 +1,133 @@
-# -*- coding: utf-8 -*-
 from django import forms
-from django.contrib.auth import authenticate, get_backends, get_user_model
+from django.contrib.auth import get_user_model
 from django.contrib.sites.shortcuts import get_current_site
-from django.core.exceptions import ImproperlyConfigured
-from django.shortcuts import resolve_url
-from django.utils.translation import ugettext_lazy as _
+from django.core.mail import EmailMultiAlternatives
+from django.template import TemplateDoesNotExist, loader
+from django.urls import reverse
+from django.utils.encoding import iri_to_uri
 
-from nopassword import models
+from nopassword.backends import NoPasswordBackend
 
 
-class LoginForm(forms.Form):
-    error_messages = {
-        'invalid_username': _(
-            "Please enter a correct %(username)s. "
-            "Note that it is case-sensitive."
-        ),
-        'inactive': _("This account is inactive."),
-    }
+class BaseLoginForm(forms.Form):
+    next = forms.CharField(widget=forms.HiddenInput)
 
-    next = forms.CharField(max_length=200, required=False, widget=forms.HiddenInput)
+    def get_login_url(self, request, token, next=None):
+        """
+        Return user login URL including the access token.
 
-    def __init__(self, *args, **kwargs):
-        super(LoginForm, self).__init__(*args, **kwargs)
+        Args:
+            request (django.http.request.HttpRequest): Current request.
+            token (str): The user specific authentication token.
+            next (str): The path the user should be forwarded to after login.
 
-        self.username_field = get_user_model()._meta.get_field(get_user_model().USERNAME_FIELD)
-        self.fields['username'] = self.username_field.formfield()
-
-    def clean_username(self):
-        username = self.cleaned_data['username']
-
-        try:
-            user = get_user_model()._default_manager.get_by_natural_key(username)
-        except get_user_model().DoesNotExist:
-            raise forms.ValidationError(
-                self.error_messages['invalid_username'],
-                code='invalid_username',
-                params={'username': self.username_field.verbose_name},
+        Returns:
+            str: User login URL including the access token.
+        """
+        protocol = 'https' if request.is_secure() else 'http'
+        current_site = get_current_site(request)
+        url = '{protocol}://{domain}{path}'.format(
+            protocol=protocol,
+            domain=current_site.domain,
+            path=reverse(
+                'nopassword:login-token',
+                kwargs={'token': token}
             )
-
-        if not user.is_active:
-            raise forms.ValidationError(
-                self.error_messages['inactive'],
-                code='inactive',
-            )
-
-        self.cleaned_data['user'] = user
-
-        return username
-
-    def save(self, request, login_code_url='login_code', domain_override=None, extra_context=None):
-        login_code = models.LoginCode.create_code_for_user(
-            user=self.cleaned_data['user'],
-            next=self.cleaned_data['next'],
         )
+        if next is not None:
+            url += '?next=%s' % iri_to_uri(next)
+        return url
 
-        if not domain_override:
-            current_site = get_current_site(request)
-            site_name = current_site.name
-            domain = current_site.domain
-        else:
-            site_name = domain = domain_override
+    def get_token(self, user):
+        """Return the access token."""
+        return NoPasswordBackend.get_token(user=user)
 
-        url = '{}://{}{}?code={}'.format(
-            'https' if request.is_secure() else 'http',
-            domain,
-            resolve_url(login_code_url),
-            login_code.code,
-        )
+    def get_context(self, request, user):
+        """
+        Return the context for a message template render.
 
-        context = {
-            'domain': domain,
-            'site_name': site_name,
-            'code': login_code.code,
-            'url': url,
+        Args:
+            request (django.http.request.HttpRequest): Current request.
+            user: The user requesting a login message.
+
+        Returns:
+            dict:
+                A context dictionary including:
+
+                - site
+                - site_name
+                - token
+                - login_url
+                - user
+
+        """
+        token = self.get_token(user)
+        site = get_current_site(request)
+        login_url = self.get_login_url(request, token, self.cleaned_data['next'])
+        return {
+            'site': site,
+            'site_name': site.name,
+            'token': token,
+            'login_url': login_url,
+            'user': user,
         }
 
-        if extra_context:
-            context.update(extra_context)
+    def save(self):
+        """
+        Method will be called from the view, if the form is valid.
 
-        self.send_login_code(login_code, context)
-
-        return login_code
-
-    def send_login_code(self, login_code, context, **kwargs):
-        for backend in get_backends():
-            if hasattr(backend, 'send_login_code'):
-                backend.send_login_code(login_code, context, **kwargs)
-                break
-        else:
-            raise ImproperlyConfigured(
-                'Please add a nopassword authentication backend to settings, '
-                'e.g. `nopassword.backends.EmailBackend`'
-            )
+        This method must be implemented by subclasses. This method
+        should trigger the login url to be sent to the user.
+        """
+        return NotImplementedError
 
 
-class LoginCodeForm(forms.Form):
-    code = forms.ModelChoiceField(
-        label=_('Login code'),
-        queryset=models.LoginCode.objects.select_related('user'),
-        to_field_name='code',
-        widget=forms.TextInput,
-        error_messages={
-            'invalid_choice': _('Login code is invalid. It might have expired.'),
-        },
-    )
+class EmailLoginForm(BaseLoginForm):
+    """Login form that contains only the Users email field."""
+    subject_template_name = 'registration/login_subject.txt'
+    email_template_name = 'registration/login_email.txt'
+    html_email_template_name = 'registration/login_email.html'
+    from_email = None
 
-    error_messages = {
-        'invalid_code': _("Unable to log in with provided login code."),
-    }
-
-    def __init__(self, request=None, *args, **kwargs):
-        super(LoginCodeForm, self).__init__(*args, **kwargs)
-
+    def __init__(self, request, *args, **kwargs):
         self.request = request
+        super(EmailLoginForm, self).__init__(*args, **kwargs)
 
-    def clean_code(self):
-        code = self.cleaned_data['code']
-        username = code.user.get_username()
-        user = authenticate(self.request, **{
-            get_user_model().USERNAME_FIELD: username,
-            'code': code.code,
-        })
+        self.field_name = get_user_model().get_email_field_name()
+        model_field = get_user_model()._meta.get_field(self.field_name)
+        field = model_field.formfield()
+        field.required = True
 
-        if not user:
-            raise forms.ValidationError(
-                self.error_messages['invalid_code'],
-                code='invalid_code',
-            )
+        self.fields[self.field_name] = field
 
-        self.cleaned_data['user'] = user
-
-        return code
-
-    def get_user(self):
-        return self.cleaned_data.get('user')
+    def get_users(self, email=None):
+        return get_user_model()._default_manager.filter(**{self.field_name: email}).iterator()
 
     def save(self):
-        self.cleaned_data['code'].delete()
+        """
+        Generate and send a one-time link for the user to login.
+
+        This method will be called from the view and passed the views request.
+        """
+        email = self.cleaned_data[self.field_name]
+        for user in self.get_users(email):
+            context = self.get_context(self.request, user)
+            self.send_mail(email, context)
+
+    def send_mail(self, to_email, context):
+        """Send a django.core.mail.EmailMultiAlternatives to `to_email`."""
+        subject = loader.render_to_string(self.subject_template_name, context)
+        # Email subject *must not* contain newlines
+        subject = ''.join(subject.splitlines())
+        body = loader.render_to_string(self.email_template_name, context)
+
+        email_message = EmailMultiAlternatives(subject, body, self.from_email, [to_email])
+        try:
+            template = loader.get_template(self.html_email_template_name)
+        except TemplateDoesNotExist:
+            pass
+        else:
+            html_email = template.render(context, self.request)
+            email_message.attach_alternative(html_email, 'text/html')
+
+        email_message.send()

@@ -1,6 +1,11 @@
 Changelog
 =========
 
+5.0.0
+-----
+
+Major refactoring. Please see the setup instructions when upgrading.
+
 4.0.0
 -----
 
@@ -26,7 +31,7 @@ Breaking changes:
 - Renamed template ``registration/login.html`` to ``registration/login_form.html``.
 - Changed content of default templates.
 - Removed views ``login_with_code_and_username``.
-- Refactored views to be class based views and to use forms instead of url parameters.
+- Refactoring views to be class based views and to use forms instead of url parameters.
 - Changed url paths
 - Removed setting ``NOPASSWORD_POST_REDIRECT``, use ``NOPASSWORD_LOGIN_ON_GET`` instead.
 - Removed setting ``NOPASSWORD_NAMESPACE``.

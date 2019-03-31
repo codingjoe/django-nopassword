@@ -1,68 +1,69 @@
-# -*- coding: utf-8 -*-
 from django.conf import settings
+from django.contrib.auth import REDIRECT_FIELD_NAME, authenticate, login
 from django.contrib.auth.views import LoginView as DjangoLoginView
-from django.contrib.auth.views import LogoutView as DjangoLogoutView
-from django.urls import reverse_lazy
+from django.http import response
+from django.shortcuts import resolve_url
 from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_protect
-from django.views.generic.edit import FormView
+from django.views import generic
+from django.views.decorators.cache import never_cache
 
 from nopassword import forms
 
+__all__ = (
+    'LoginView', 'LoginTokenView',
+)
 
-class LoginView(FormView):
+
+class LoginView(DjangoLoginView):
     """
     Sends a login code to the user.
     It doesn't authenticate a user but it is the entry point for the login process (login url).
     """
 
-    form_class = forms.LoginForm
-    success_url = reverse_lazy('login_code')
-    template_name = 'registration/login_form.html'
-
-    @method_decorator(csrf_protect)
-    def dispatch(self, request, *args, **kwargs):
-        return super(LoginView, self).dispatch(request, *args, **kwargs)
-
-    def get_form_kwargs(self):
-        kwargs = super(LoginView, self).get_form_kwargs()
-        kwargs['initial'] = {'next': self.request.GET.get('next')}
-        return kwargs
-
-    def form_valid(self, form):
-        form.save(request=self.request)
-        return super(LoginView, self).form_valid(form)
-
-
-class LoginCodeView(DjangoLoginView):
-    """
-    Authenticates a user with a login code.
-    """
-
-    form_class = forms.LoginCodeForm
-    template_name = 'registration/login_code.html'
-
-    def get(self, request, *args, **kwargs):
-        if 'code' in self.request.GET and getattr(settings, 'NOPASSWORD_LOGIN_ON_GET', False):
-            return super(LoginCodeView, self).post(request, *args, **kwargs)
-        return super(LoginCodeView, self).get(request, *args, **kwargs)
+    form_class = forms.EmailLoginForm
+    success_url = getattr(settings, 'LOGIN_REQUESTED_URL', 'nopassword:login-success')
+    template_name = 'registration/login.html'
+    redirect_field_name = REDIRECT_FIELD_NAME
 
     def form_valid(self, form):
         form.save()
-        return super(LoginCodeView, self).form_valid(form)
+        return response.HttpResponseRedirect(self.get_success_url())
 
-    def get_form_kwargs(self):
-        kwargs = super(LoginCodeView, self).get_form_kwargs()
-
-        if self.request.method == 'GET' and 'code' in self.request.GET:
-            kwargs['data'] = self.request.GET
-
-        return kwargs
-
-    def get_redirect_url(self):
-        login_code = getattr(self.request.user, 'login_code', None)
-        return login_code.next if login_code else ''
+    def get_success_url(self):
+        return resolve_url(self.success_url)
 
 
-class LogoutView(DjangoLogoutView):
-    pass
+INTERNAL_LOGIN_URL_TOKEN = 'login-token'
+
+
+class LoginTokenView(DjangoLoginView):
+    """Authenticate a user via a access token."""
+
+    redirect_field_name = REDIRECT_FIELD_NAME
+
+    @method_decorator(never_cache)
+    def dispatch(self, request, *args, **kwargs):
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        try:
+            token = kwargs['token']
+        except KeyError:
+            return response.HttpResponseBadRequest("Missing access token.")
+
+        user = authenticate(request, token=token)
+        if user is None:
+            return response.HttpResponseNotAllowed("Access denied.")
+        else:
+            login(self.request, user=user)
+            # Remove token from the HTTP Referer header
+            self.request.path.replace(token, INTERNAL_LOGIN_URL_TOKEN)
+
+        return response.HttpResponseRedirect(self.get_success_url())
+
+    def post(self, request, *args, **kwargs):
+        return self.http_method_not_allowed(request, *args, **kwargs)
+
+
+class LoginRequestedView(generic.TemplateView):
+    template_name = 'registration/login_requested.html'
